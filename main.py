@@ -16,6 +16,12 @@ def get_env_or_default(env, default):
     val = os.getenv(env)
     return val if val is not None else default
 
+def parse_bool_env(env: str, default: bool) -> bool:
+    val = os.getenv(env)
+    if val is None:
+        return default
+    return val.strip().lower() not in ("false", "0", "no")
+
 def get_attr_or_key(obj, name):
     if hasattr(obj, name):
         return getattr(obj, name)
@@ -38,8 +44,8 @@ interval_between_scans = int(get_env_or_default("INTERVAL_BETWEEN_SCANS", 5 * 60
 min_score = int(get_env_or_default("MIN_SCORE", 86))
 log_level = get_env_or_default("LOG_LEVEL", "INFO")
 log_directory = get_env_or_default("LOG_DIRECTORY", "logs/")
-series_scan = bool(get_env_or_default("SERIES_SCAN", True))
-movies_scan = bool(get_env_or_default("MOVIES_SCAN", True))
+series_scan = parse_bool_env("SERIES_SCAN", True)
+movies_scan = parse_bool_env("MOVIES_SCAN", True)
 
 # Profile Migration Env Vars
 source_profile_id = get_env_or_default("SOURCE_PROFILE_ID", None)
@@ -48,11 +54,22 @@ if source_profile_id: source_profile_id = int(source_profile_id)
 if target_profile_id: target_profile_id = int(target_profile_id)
 
 action_cooldown_cache = {}
-ACTION_COOLDOWN_SECONDS = 3600
+action_cooldown_lock = threading.Lock()
+ACTION_COOLDOWN_SECONDS = int(get_env_or_default("ACTION_COOLDOWN_SECONDS", 3600))
+gpu_semaphore = threading.Semaphore(1)
 
 key_fn = lambda x: f" {'s' if get_attr_or_key(x, 'is_serie') else 'm'} {get_attr_or_key(x, 'video_id')}_{get_attr_or_key(x, 'to_language')}"
 search_key_fn = lambda x: f"search_{'s' if get_attr_or_key(x, 'is_serie') else 'm'}_{get_attr_or_key(x, 'video_id')}"
 migration_key_fn = lambda x: f"mig_{x['type']}_{x['mig_id']}"
+
+def check_and_set_cooldown(cache_key: str) -> bool:
+    """Returns True and updates timestamp if cooldown has elapsed, False otherwise."""
+    current_time = time.time()
+    with action_cooldown_lock:
+        if current_time - action_cooldown_cache.get(cache_key, 0) > ACTION_COOLDOWN_SECONDS:
+            action_cooldown_cache[cache_key] = current_time
+            return True
+    return False
 
 task_queue = UniqueQueue(key_fn=key_fn)
 search_task_queue = UniqueQueue(key_fn=search_key_fn)
@@ -304,8 +321,9 @@ def translation_worker(worker_id, base_url, api_key):
                     "hi": sub.base_subtitle.hi,
                     "original_format": True,
                 }
-                response = client.patch(endpoint, headers=headers, params=params)
-                response.raise_for_status()
+                with gpu_semaphore:
+                    response = client.patch(endpoint, headers=headers, params=params)
+                    response.raise_for_status()
                 logger.info(f"[Translate Worker: {worker_id}] Translation finished")
 
             except Exception:
@@ -339,7 +357,7 @@ def search_worker(worker_id, base_url, api_key):
                 get_response.raise_for_status()
                 data = get_response.json().get("data", [])
                 
-                def trigger_download(sub_candidate):
+                def trigger_download(sub_candidate, use_gpu=False):
                     hi_flag = "true" if str(sub_candidate.get("hearing_impaired", "False")).lower() == "true" else "false"
                     forced_flag = "true" if str(sub_candidate.get("forced", "False")).lower() == "true" else "false"
 
@@ -358,8 +376,13 @@ def search_worker(worker_id, base_url, api_key):
                         post_endpoint = f"{base_url}/api/providers/movies"
                         post_params.update({"radarrid": video_id})
 
-                    post_response = client.post(post_endpoint, headers=headers, params=post_params)
-                    post_response.raise_for_status()
+                    if use_gpu:
+                        with gpu_semaphore:
+                            post_response = client.post(post_endpoint, headers=headers, params=post_params)
+                            post_response.raise_for_status()
+                    else:
+                        post_response = client.post(post_endpoint, headers=headers, params=post_params)
+                        post_response.raise_for_status()
                     logger.info(f"[Search Worker: {worker_id}] Successfully triggered {sub_candidate['provider']} for ID: {video_id}")
 
                 for target_lang in missing_languages:
@@ -382,22 +405,19 @@ def search_worker(worker_id, base_url, api_key):
                     if external_base_sub:
                         sub_trans = SubtitleTranslate(external_base_sub, target_lang, video_id, is_serie)
                         if not task_queue.check(sub_trans):
-                            cache_key = f"trans_{video_id}_{target_lang}"
-                            current_time = time.time()
-                            if current_time - action_cooldown_cache.get(cache_key, 0) > ACTION_COOLDOWN_SECONDS:
-                                action_cooldown_cache[cache_key] = current_time
+                            if check_and_set_cooldown(f"trans_{video_id}_{target_lang}"):
                                 task_queue.put(sub_trans)
                                 logger.info(f"[Search Worker: {worker_id}] Queued Translate: {external_base_sub.path} -> {target_lang}")
                         continue
-                        
+
                     # 3. If no external base sub, check for valid Base Language candidates to extract/download/whisper
                     base_candidates = [
-                        c for c in data 
+                        c for c in data
                         if c.get("language") in base_languages and (
                             c.get("provider") in ["embeddedsubtitles", "whisperai"] or c.get("score", 0) >= min_score
                         )
                     ]
-                    
+
                     if base_candidates:
                         def base_sort_key(c):
                             prov = c.get("provider")
@@ -408,13 +428,11 @@ def search_worker(worker_id, base_url, api_key):
 
                         base_candidates.sort(key=base_sort_key)
                         best_base = base_candidates[0]
-                        
-                        cache_key = f"base_dl_{video_id}_{best_base['provider']}"
-                        current_time = time.time()
-                        if current_time - action_cooldown_cache.get(cache_key, 0) > ACTION_COOLDOWN_SECONDS:
-                            action_cooldown_cache[cache_key] = current_time
+
+                        if check_and_set_cooldown(f"base_dl_{video_id}_{best_base['provider']}"):
+                            is_whisper = best_base.get("provider") == "whisperai"
                             logger.info(f"[Search Worker: {worker_id}] Found valid {best_base['provider']} base candidate for {best_base.get('language')} (Score: {best_base.get('score', 0)}). Triggering...")
-                            trigger_download(best_base)
+                            trigger_download(best_base, use_gpu=is_whisper)
                     else:
                         logger.info(f"[Search Worker: {worker_id}] No valid base or target candidates found for ID: {video_id} (Target: {target_lang})")
 
@@ -440,11 +458,8 @@ async def scan_and_process(base_url, api_key, media_type="episodes"):
     
     items_to_process = await find_subtitles_to_process(base_url, api_key, items)
     
-    current_time = time.time()
     for item in items_to_process:
-        cache_key = f"search_{item['video_id']}"
-        if current_time - action_cooldown_cache.get(cache_key, 0) > ACTION_COOLDOWN_SECONDS:
-            action_cooldown_cache[cache_key] = current_time
+        if check_and_set_cooldown(f"search_{item['video_id']}"):
             search_task_queue.put(item)
             logger.info(f"Queued Provider Search for {'Episode' if item['is_serie'] else 'Movie'} ID {item['video_id']}")
 
