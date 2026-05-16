@@ -56,7 +56,8 @@ if target_profile_id: target_profile_id = int(target_profile_id)
 action_cooldown_cache = {}
 action_cooldown_lock = threading.Lock()
 ACTION_COOLDOWN_SECONDS = int(get_env_or_default("ACTION_COOLDOWN_SECONDS", 3600))
-gpu_semaphore = threading.Semaphore(1)
+lingarr_semaphore = threading.Semaphore(1)
+whisper_semaphore = threading.Semaphore(1)
 
 key_fn = lambda x: f" {'s' if get_attr_or_key(x, 'is_serie') else 'm'} {get_attr_or_key(x, 'video_id')}_{get_attr_or_key(x, 'to_language')}"
 search_key_fn = lambda x: f"search_{'s' if get_attr_or_key(x, 'is_serie') else 'm'}_{get_attr_or_key(x, 'video_id')}"
@@ -321,7 +322,7 @@ def translation_worker(worker_id, base_url, api_key):
                     "hi": sub.base_subtitle.hi,
                     "original_format": True,
                 }
-                with gpu_semaphore:
+                with lingarr_semaphore:
                     response = client.patch(endpoint, headers=headers, params=params)
                     response.raise_for_status()
                 logger.info(f"[Translate Worker: {worker_id}] Translation finished")
@@ -377,7 +378,7 @@ def search_worker(worker_id, base_url, api_key):
                         post_params.update({"radarrid": video_id})
 
                     if use_gpu:
-                        with gpu_semaphore:
+                        with whisper_semaphore:
                             post_response = client.post(post_endpoint, headers=headers, params=post_params)
                             post_response.raise_for_status()
                     else:
