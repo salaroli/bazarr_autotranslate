@@ -38,6 +38,10 @@ base_languages = [lang.strip() for lang in base_languages_env.split(",")] if bas
 to_languages_env = os.getenv("TO_LANGUAGES")
 to_languages = [lang.strip() for lang in to_languages_env.split(",")] if to_languages_env else []
 
+base_languages_set = set(base_languages)
+to_languages_set = set(to_languages)
+base_lang_priority = {lang: idx for idx, lang in enumerate(base_languages)}
+
 translation_request_timeout = int(get_env_or_default("TRANSLATION_REQUEST_TIMEOUT", 15 * 60))
 num_workers = int(get_env_or_default("NUM_WORKERS", 1))
 interval_between_scans = int(get_env_or_default("INTERVAL_BETWEEN_SCANS", 5 * 60))
@@ -78,6 +82,9 @@ migration_queue = UniqueQueue(key_fn=migration_key_fn)
 shutdown_event = asyncio.Event()
 logger = logging.getLogger("bazarr_lingarr")
 
+# Single persistent async client reused across all scans (avoids connection pool churn)
+async_client: Optional[httpx.AsyncClient] = None
+
 
 async def process_profile_migrations(base_url, api_key, media_type):
     """Independently checks for media missing 'no' and migrates their profile to 'nb'"""
@@ -86,16 +93,15 @@ async def process_profile_migrations(base_url, api_key, media_type):
         
     endpoint = f"{base_url}/api/{media_type}/wanted"
     headers = {"X-API-KEY": api_key}
-    
+
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(endpoint, headers=headers, params={"start": 0, "length": -1})
-            resp.raise_for_status()
-            wanted_data = resp.json().get("data", [])
+        resp = await async_client.get(endpoint, headers=headers, params={"start": 0, "length": -1})
+        resp.raise_for_status()
+        wanted_data = resp.json().get("data", [])
     except Exception as e:
         logger.error(f"Migration check failed to get wanted {media_type}: {e}")
         return
-        
+
     candidates = []
     for obj in wanted_data:
         missing = obj.get("missing_subtitles", [])
@@ -104,61 +110,65 @@ async def process_profile_migrations(base_url, api_key, media_type):
             series_id = obj.get("sonarrSeriesId") if media_type == "episodes" else None
             if vid_id:
                 candidates.append({"vid_id": vid_id, "series_id": series_id})
-                
+
     if not candidates:
         return
-        
+
     meta_endpoint = f"{base_url}/api/{media_type}"
-    async with httpx.AsyncClient() as client:
-        chunk_size = 50
-        for i in range(0, len(candidates), chunk_size):
-            chunk = candidates[i:i+chunk_size]
-            vid_ids = [c["vid_id"] for c in chunk]
-            params = {"radarrid[]" if media_type == "movies" else "episodeid[]": vid_ids}
-            
-            try:
-                meta_resp = await client.get(meta_endpoint, headers=headers, params=params)
-                meta_resp.raise_for_status()
-                for raw_item in meta_resp.json().get("data", []):
-                    prof_id = raw_item.get("language_profile_id") or raw_item.get("profile_id") or raw_item.get("profileId")
-                    
-                    if prof_id == source_profile_id:
-                        v_id = raw_item.get("radarrId") if media_type == "movies" else raw_item.get("sonarrEpisodeId")
-                        c = next((x for x in chunk if x["vid_id"] == v_id), None)
-                        if c:
-                            mig_id = v_id if media_type == "movies" else c["series_id"]
-                            if media_type == "episodes" and not mig_id:
-                                mig_id = raw_item.get("sonarrSeriesId") or raw_item.get("seriesId")
-                            
-                            if mig_id and not migration_queue.check({"type": media_type, "mig_id": mig_id}):
-                                logger.info(f"Queued Profile Migration for {media_type} (Target ID: {mig_id})")
-                                migration_queue.put({
-                                    "type": media_type,
-                                    "mig_id": mig_id,
-                                    "target_profile": target_profile_id
-                                })
-            except Exception as e:
-                logger.error(f"Migration metadata fetch failed: {e}")
+    id_param = "radarrid[]" if media_type == "movies" else "episodeid[]"
+    chunk_size = 50
+    chunks = [candidates[i:i + chunk_size] for i in range(0, len(candidates), chunk_size)]
+
+    async def fetch_chunk(chunk):
+        params = {id_param: [c["vid_id"] for c in chunk]}
+        meta_resp = await async_client.get(meta_endpoint, headers=headers, params=params)
+        meta_resp.raise_for_status()
+        return chunk, meta_resp.json().get("data", [])
+
+    results = await asyncio.gather(*(fetch_chunk(c) for c in chunks), return_exceptions=True)
+
+    for result in results:
+        if isinstance(result, Exception):
+            logger.error(f"Migration metadata fetch failed: {result}")
+            continue
+        chunk, raw_items = result
+        for raw_item in raw_items:
+            prof_id = raw_item.get("language_profile_id") or raw_item.get("profile_id") or raw_item.get("profileId")
+            if prof_id == source_profile_id:
+                v_id = raw_item.get("radarrId") if media_type == "movies" else raw_item.get("sonarrEpisodeId")
+                c = next((x for x in chunk if x["vid_id"] == v_id), None)
+                if c:
+                    mig_id = v_id if media_type == "movies" else c["series_id"]
+                    if media_type == "episodes" and not mig_id:
+                        mig_id = raw_item.get("sonarrSeriesId") or raw_item.get("seriesId")
+
+                    if mig_id and not migration_queue.check({"type": media_type, "mig_id": mig_id}):
+                        logger.info(f"Queued Profile Migration for {media_type} (Target ID: {mig_id})")
+                        migration_queue.put({
+                            "type": media_type,
+                            "mig_id": mig_id,
+                            "target_profile": target_profile_id
+                        })
 
 async def get_episodes_metadata(base_url: str, api_key: str, episode_ids: Optional[List[int]] = None) -> List[Serie] | None:
     endpoint = f"{base_url}/api/episodes"
     headers = {"X-API-KEY": api_key}
     try:
-        async with httpx.AsyncClient() as client:
-            if not episode_ids:
-                response = await client.get(endpoint, headers=headers)
-                response.raise_for_status()
-                return [Serie.from_dict(obj) for obj in response.json()["data"]]
-            
-            all_episodes = []
-            chunk_size = 50
-            for i in range(0, len(episode_ids), chunk_size):
-                chunk = episode_ids[i:i + chunk_size]
-                params = {"episodeid[]": chunk}
-                response = await client.get(endpoint, headers=headers, params=params)
-                response.raise_for_status()
-                all_episodes.extend([Serie.from_dict(obj) for obj in response.json()["data"]])
-            return all_episodes
+        if not episode_ids:
+            response = await async_client.get(endpoint, headers=headers)
+            response.raise_for_status()
+            return [Serie.from_dict(obj) for obj in response.json()["data"]]
+
+        chunk_size = 50
+        chunks = [episode_ids[i:i + chunk_size] for i in range(0, len(episode_ids), chunk_size)]
+
+        async def fetch(chunk):
+            response = await async_client.get(endpoint, headers=headers, params={"episodeid[]": chunk})
+            response.raise_for_status()
+            return [Serie.from_dict(obj) for obj in response.json()["data"]]
+
+        results = await asyncio.gather(*(fetch(c) for c in chunks))
+        return [serie for batch in results for serie in batch]
     except Exception:
         logger.exception("Error while getting episode metadata:")
         return None
@@ -167,10 +177,9 @@ async def get_wanted_episodes(base_url: str, api_key: str) -> List[Serie] | None
     endpoint = f"{base_url}/api/episodes/wanted"
     headers = {"X-API-KEY": api_key}
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(endpoint, headers=headers, params={"start": 0, "length": -1})
-            response.raise_for_status()
-            return [Serie.from_dict(obj) for obj in response.json()["data"]]
+        response = await async_client.get(endpoint, headers=headers, params={"start": 0, "length": -1})
+        response.raise_for_status()
+        return [Serie.from_dict(obj) for obj in response.json()["data"]]
     except Exception:
         logger.exception("Error while getting wanted episodes:")
         return None
@@ -179,21 +188,21 @@ async def get_movies_metadata(base_url: str, api_key: str, movie_ids: Optional[L
     endpoint = f"{base_url}/api/movies"
     headers = {"X-API-KEY": api_key}
     try:
-        async with httpx.AsyncClient() as client:
-            if not movie_ids:
-                response = await client.get(endpoint, headers=headers)
-                response.raise_for_status()
-                return [Movie.from_dict(obj) for obj in response.json()["data"]]
-            
-            all_movies = []
-            chunk_size = 50
-            for i in range(0, len(movie_ids), chunk_size):
-                chunk = movie_ids[i:i + chunk_size]
-                params = {"radarrid[]": chunk}
-                response = await client.get(endpoint, headers=headers, params=params)
-                response.raise_for_status()
-                all_movies.extend([Movie.from_dict(obj) for obj in response.json()["data"]])
-            return all_movies
+        if not movie_ids:
+            response = await async_client.get(endpoint, headers=headers)
+            response.raise_for_status()
+            return [Movie.from_dict(obj) for obj in response.json()["data"]]
+
+        chunk_size = 50
+        chunks = [movie_ids[i:i + chunk_size] for i in range(0, len(movie_ids), chunk_size)]
+
+        async def fetch(chunk):
+            response = await async_client.get(endpoint, headers=headers, params={"radarrid[]": chunk})
+            response.raise_for_status()
+            return [Movie.from_dict(obj) for obj in response.json()["data"]]
+
+        results = await asyncio.gather(*(fetch(c) for c in chunks))
+        return [movie for batch in results for movie in batch]
     except Exception:
         logger.exception("Error while getting movies metadata:")
         return None
@@ -202,10 +211,9 @@ async def get_wanted_movies(base_url: str, api_key: str) -> List[Movie] | None:
     endpoint = f"{base_url}/api/movies/wanted"
     headers = {"X-API-KEY": api_key}
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(endpoint, headers=headers, params={"start": 0, "length": -1})
-            response.raise_for_status()
-            return [Movie.from_dict(obj) for obj in response.json()["data"]]
+        response = await async_client.get(endpoint, headers=headers, params={"start": 0, "length": -1})
+        response.raise_for_status()
+        return [Movie.from_dict(obj) for obj in response.json()["data"]]
     except Exception:
         logger.exception("Error while getting wanted movies:")
         return None
@@ -225,7 +233,7 @@ async def find_subtitles_to_process(base_url, api_key, videos: List[Serie] | Lis
         video_id = video.sonarr_episode_id if isinstance(video, Serie) else video.radarr_id
         missing_langs = []
         for missing_sub in video.missing_subtitles:
-            if missing_sub.code2 in to_languages:
+            if missing_sub.code2 in to_languages_set:
                 missing_langs.append(missing_sub.code2)
         if missing_langs:
             video_id_language_map[video_id] = missing_langs
@@ -254,11 +262,11 @@ async def find_subtitles_to_process(base_url, api_key, videos: List[Serie] | Lis
         if video.subtitles is None:
             video.subtitles = []
 
-        base_subs = [sub for sub in video.subtitles if sub.code2 in base_languages]
+        base_subs = [sub for sub in video.subtitles if sub.code2 in base_languages_set]
         external_base_subs = [sub for sub in base_subs if is_external_subtitle(sub, getattr(video, 'path', None))]
 
         if external_base_subs:
-            external_base_subs.sort(key=lambda x: base_languages.index(x.code2))
+            external_base_subs.sort(key=lambda x: base_lang_priority[x.code2])
 
         series_id = getattr(video, 'sonarr_series_id', None) or getattr(video, 'series_id', None) if isinstance(video, Serie) else None
         
@@ -312,15 +320,18 @@ def translation_worker(worker_id, base_url, api_key):
                 sub = task_queue.get()
                 logger.info(f"[Translate Worker: {worker_id}] Translating: {sub.base_subtitle.path} to: {sub.to_language}")
 
+                # Bazarr's /api/subtitles PATCH compares these with `== 'True'` (case-sensitive),
+                # so they must be sent as the exact strings "True"/"False", not Python bools
+                # (httpx serializes bool True as lowercase "true", which Bazarr reads as False).
                 params = {
                     "action": "translate",
                     "language": sub.to_language,
                     "path": sub.base_subtitle.path,
                     "type": "episode" if sub.is_serie else "movie",
                     "id": sub.video_id,
-                    "forced": sub.base_subtitle.forced,
-                    "hi": sub.base_subtitle.hi,
-                    "original_format": True,
+                    "forced": "True" if sub.base_subtitle.forced else "False",
+                    "hi": "True" if sub.base_subtitle.hi else "False",
+                    "original_format": "True",
                 }
                 with lingarr_semaphore:
                     response = client.patch(endpoint, headers=headers, params=params)
@@ -414,8 +425,8 @@ def search_worker(worker_id, base_url, api_key):
                     # 3. If no external base sub, check for valid Base Language candidates to extract/download/whisper
                     base_candidates = [
                         c for c in data
-                        if c.get("language") in base_languages and (
-                            c.get("provider") in ["embeddedsubtitles", "whisperai"] or c.get("score", 0) >= min_score
+                        if c.get("language") in base_languages_set and (
+                            c.get("provider") in ("embeddedsubtitles", "whisperai") or c.get("score", 0) >= min_score
                         )
                     ]
 
@@ -423,7 +434,7 @@ def search_worker(worker_id, base_url, api_key):
                         def base_sort_key(c):
                             prov = c.get("provider")
                             prov_priority = 0 if prov == "embeddedsubtitles" else 2 if prov == "whisperai" else 1
-                            lang_priority = base_languages.index(c.get("language")) if c.get("language") in base_languages else 99
+                            lang_priority = base_lang_priority.get(c.get("language"), 99)
                             score_priority = -c.get("score", 0)
                             return (prov_priority, lang_priority, score_priority)
 
@@ -465,19 +476,23 @@ async def scan_and_process(base_url, api_key, media_type="episodes"):
             logger.info(f"Queued Provider Search for {'Episode' if item['is_serie'] else 'Movie'} ID {item['video_id']}")
 
 async def main(base_url, api_key):
+    global async_client
+
     for i in range(num_workers):
         threading.Thread(target=translation_worker, args=(i, base_url, api_key), daemon=True).start()
         threading.Thread(target=search_worker, args=(i, base_url, api_key), daemon=True).start()
         threading.Thread(target=migration_worker, args=(i, base_url, api_key), daemon=True).start()
-    
-    while not shutdown_event.is_set():
-        try:
-            if series_scan: await scan_and_process(base_url, api_key, "episodes")
-            if movies_scan: await scan_and_process(base_url, api_key, "movies")
-        except Exception:
-            logger.exception("Uncaught exception:")
-        
-        await asyncio.sleep(interval_between_scans)
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        async_client = client
+        while not shutdown_event.is_set():
+            try:
+                if series_scan: await scan_and_process(base_url, api_key, "episodes")
+                if movies_scan: await scan_and_process(base_url, api_key, "movies")
+            except Exception:
+                logger.exception("Uncaught exception:")
+
+            await asyncio.sleep(interval_between_scans)
 
 def handle_shutdown():
     logger.info("Received exit signal")
