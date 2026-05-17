@@ -271,17 +271,13 @@ Set these in Portainer's **Environment variables** section. Variables with a def
 | `SERIES_SCAN` | No | `true` | Enable/disable episode scanning |
 | `MOVIES_SCAN` | No | `true` | Enable/disable movie scanning |
 | `LOG_LEVEL` | No | `INFO` | `INFO` or `DEBUG` |
-| `LOG_PATH` | No | `./logs` | Host path for log files |
+| `LOG_PATH` | No | `/mnt/nvme/appdata/bazarr-autotranslate` | Host path for log files |
 
 #### Network
 
-By default the container uses its own isolated network. If Bazarr runs in a **different stack**, you have two options:
+The container joins the `mediaproxy` external Docker network by default — the same network your Bazarr stack should already be on. If you use a different network name, fork the repo and change `mediaproxy` in `docker-compose.yml` (both the service `networks:` entry and the top-level `networks:` key).
 
-**Option A — Use the host IP** (simplest): set `BAZARR_BASE_URL` to `http://192.168.1.x:6767` (your server's LAN IP). No network changes needed.
-
-**Option B — Join the existing Docker network**: edit the `docker-compose.yml` via Portainer's stack editor after deploy, or fork the repo and uncomment the `networks:` block in the compose file, replacing `your_existing_network` with the network name shown in Portainer under **Networks**.
-
-> In Portainer, go to **Networks** to find the name of the network used by your Bazarr stack — it's usually `stackname_default`.
+If you'd rather not deal with networks, set `BAZARR_BASE_URL` to your server's LAN IP (e.g. `http://192.168.1.x:6767`) and the container will reach Bazarr without sharing a network.
 
 ---
 

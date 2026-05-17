@@ -16,12 +16,10 @@ services:
       - MOVIES_SCAN=${MOVIES_SCAN:-true}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
-      - ${LOG_PATH:-./logs}:/usr/src/app/logs
-    # To join an existing Docker network (e.g. the one your Bazarr stack uses),
-    # uncomment the lines below and replace "your_existing_network" with the network name.
-    # networks:
-    #   - your_existing_network
+      - ${LOG_PATH:-/mnt/nvme/appdata/bazarr-autotranslate}:/usr/src/app/logs
+    networks:
+      - mediaproxy
 
-# networks:
-#   your_existing_network:
-#     external: true
+networks:
+  mediaproxy:
+    external: true
