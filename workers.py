@@ -31,6 +31,7 @@ class TranslationWorker:
         return t
 
     def _run(self) -> None:
+        logger.info(f"[Translate Worker: {self._id}] Started")
         with httpx.Client(timeout=self._timeout) as client:
             while True:
                 sub: SubtitleTranslate | None = None
@@ -82,6 +83,7 @@ class SearchWorker:
         return t
 
     def _run(self) -> None:
+        logger.info(f"[Search Worker: {self._id}] Started")
         with httpx.Client(timeout=self._timeout) as client:
             while True:
                 task: SearchTask | None = None
@@ -106,6 +108,7 @@ class SearchWorker:
         resp = client.get(endpoint, headers=self._headers, params=params)
         resp.raise_for_status()
         candidates = resp.json().get("data", [])
+        logger.debug(f"[Search Worker: {self._id}] {len(candidates)} candidate(s) returned for ID {task.video_id}")
 
         for target_lang in task.missing_languages:
             self._handle_language(client, task, candidates, target_lang)
@@ -129,10 +132,13 @@ class SearchWorker:
         # Priority 2: external base subtitle exists → queue for Lingarr translation
         if task.external_base_sub:
             sub_trans = SubtitleTranslate(task.external_base_sub, target_lang, task.video_id, task.is_serie)
-            if not self._translation_queue.check(sub_trans):
-                if self._cooldown.check_and_set(f"trans_{task.video_id}_{target_lang}"):
-                    self._translation_queue.put(sub_trans)
-                    logger.info(f"[Search Worker: {self._id}] Queued Translate: {task.external_base_sub.path} -> {target_lang}")
+            if self._translation_queue.check(sub_trans):
+                logger.debug(f"[Search Worker: {self._id}] ID {task.video_id} → {target_lang}: translation already in queue")
+            elif not self._cooldown.check_and_set(f"trans_{task.video_id}_{target_lang}"):
+                logger.debug(f"[Search Worker: {self._id}] ID {task.video_id} → {target_lang}: translation cooldown not elapsed")
+            else:
+                self._translation_queue.put(sub_trans)
+                logger.info(f"[Search Worker: {self._id}] Queued Translate: {task.external_base_sub.path} -> {target_lang}")
             return
 
         # Priority 3: download base language candidate (to translate next cycle)
@@ -196,6 +202,7 @@ class MigrationWorker:
         return t
 
     def _run(self) -> None:
+        logger.info(f"[Migration Worker: {self._id}] Started")
         with httpx.Client(timeout=15) as client:
             while True:
                 task: MigrationTask | None = None

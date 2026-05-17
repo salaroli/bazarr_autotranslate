@@ -29,6 +29,27 @@ class BazarrClient:
             await self._client.aclose()
             self._client = None
 
+    async def ping(self) -> bool:
+        """Verifies connectivity and API key validity against Bazarr."""
+        try:
+            resp = await self._client.get(
+                f"{self._base_url}/api/episodes/wanted",
+                headers=self._headers,
+                params={"start": 0, "length": 1},
+            )
+            resp.raise_for_status()
+            logger.info(f"Connected to Bazarr at {self._base_url}")
+            return True
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Bazarr returned HTTP {e.response.status_code} — "
+                f"invalid API key or wrong URL? Response: {e.response.text[:300]}"
+            )
+            return False
+        except Exception as e:
+            logger.error(f"Cannot reach Bazarr at {self._base_url}: {e}")
+            return False
+
     async def get_wanted(self, media_type: str) -> list[Serie | Movie]:
         endpoint = f"{self._base_url}/api/{media_type}/wanted"
         parse = Serie.from_dict if media_type == "episodes" else Movie.from_dict
@@ -37,6 +58,9 @@ class BazarrClient:
                                           params={"start": 0, "length": -1})
             resp.raise_for_status()
             return [parse(obj) for obj in resp.json().get("data", [])]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP {e.response.status_code} fetching wanted {media_type}: {e.response.text[:300]}")
+            return []
         except Exception:
             logger.exception(f"Error fetching wanted {media_type}:")
             return []
@@ -56,6 +80,9 @@ class BazarrClient:
         try:
             results = await asyncio.gather(*(fetch(c) for c in chunks))
             return [item for batch in results for item in batch]
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP {e.response.status_code} fetching {media_type} metadata: {e.response.text[:300]}")
+            return []
         except Exception:
             logger.exception(f"Error fetching {media_type} metadata:")
             return []
@@ -75,7 +102,9 @@ class BazarrClient:
         results = await asyncio.gather(*(fetch(c) for c in chunks), return_exceptions=True)
         raw: list[dict] = []
         for result in results:
-            if isinstance(result, Exception):
+            if isinstance(result, httpx.HTTPStatusError):
+                logger.error(f"HTTP {result.response.status_code} fetching migration metadata: {result.response.text[:300]}")
+            elif isinstance(result, Exception):
                 logger.error(f"Migration metadata fetch failed: {result}")
             else:
                 raw.extend(result)

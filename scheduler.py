@@ -42,14 +42,28 @@ class Orchestrator:
 
         wanted = await self._client.get_wanted(media_type)
         if not wanted:
-            logger.info(f"Found no missing subtitles for {media_type}")
+            logger.info(f"No missing subtitles found for {media_type}")
             return
 
+        logger.debug(f"[{media_type}] {len(wanted)} item(s) with missing subtitles from Bazarr")
         tasks = await self._build_search_tasks(media_type, wanted)
+
+        queued = skipped_cooldown = 0
         for task in tasks:
             if self._cooldown.check_and_set(f"search_{task.video_id}"):
                 self._search_queue.put(task)
+                queued += 1
                 logger.info(f"Queued Provider Search for {'Episode' if task.is_serie else 'Movie'} ID {task.video_id}")
+            else:
+                skipped_cooldown += 1
+                logger.debug(f"[{media_type}] Skipping ID {task.video_id}: cooldown not elapsed yet")
+
+        parts = [f"{len(wanted)} missing"]
+        if queued:
+            parts.append(f"{queued} queued")
+        if skipped_cooldown:
+            parts.append(f"{skipped_cooldown} in cooldown")
+        logger.info(f"Scan done [{media_type}]: {', '.join(parts)}")
 
     async def _build_search_tasks(self, media_type: str,
                                   wanted: list[Serie | Movie]) -> list[SearchTask]:
@@ -102,6 +116,8 @@ class Orchestrator:
             )
             if not self._search_queue.check(task):
                 tasks.append(task)
+            else:
+                logger.debug(f"[{media_type}] Skipping ID {vid_id}: already in search queue")
 
         return tasks
 
