@@ -273,30 +273,99 @@ networks:
 
 ---
 
-## Monitoring
+## Monitoring & Debugging
 
-Logs are written to both stdout (visible in `docker logs bazarr_autotranslate` or Portainer's container log view) and to a rotating daily file under `LOG_DIRECTORY`.
+Logs are written to both stdout (visible in `docker logs bazarr_autotranslate` or Portainer's container log view) and to a rotating daily file under `LOG_DIRECTORY` (4 days retained).
 
-```
+```bash
 # Follow live logs
 docker logs -f bazarr_autotranslate
 
 # Inspect log files
-ls ./logs/
 tail -f ./logs/bazarr_lingarr_autotranslate.log
 ```
 
-Typical log output during a scan:
+### Log levels
+
+| Level | Set via | What you see |
+|---|---|---|
+| `INFO` | `LOG_LEVEL=INFO` (default) | Startup banner, connectivity test, actions taken, per-scan summary |
+| `DEBUG` | `LOG_LEVEL=DEBUG` | Everything above + reasons why items were skipped, candidate counts |
+
+### Startup output
+
+On every start the daemon prints a configuration summary and immediately tests connectivity to Bazarr:
 
 ```
-2025-01-15 03:00:01 - INFO - Scanning for episodes
-2025-01-15 03:00:02 - INFO - Queued Provider Search for Episode ID 1042
-2025-01-15 03:00:02 - INFO - [Search Worker: 0] Querying Providers for Episode ID: 1042
-2025-01-15 03:00:03 - INFO - [Search Worker: 0] Found embeddedsubtitles for pt (Score: 0). Direct download...
-2025-01-15 03:00:04 - INFO - [Search Worker: 0] Triggered embeddedsubtitles for ID: 1042
-2025-01-15 03:00:05 - INFO - [Search Worker: 0] Queued Translate: /media/show/s01e01.en.srt -> pt
-2025-01-15 03:00:05 - INFO - [Translate Worker: 0] Translating: /media/show/s01e01.en.srt to: pt
-2025-01-15 03:07:30 - INFO - [Translate Worker: 0] Translation finished
+=======================================================
+Bazarr Auto-Translate starting
+  Bazarr URL    : http://192.168.1.10:6767
+  Base langs    : en
+  Target langs  : pt
+  Min score     : 86
+  Workers       : 1
+  Scan interval : 300s
+  Cooldown      : 3600s
+  Series scan   : True
+  Movies scan   : True
+=======================================================
+Connected to Bazarr at http://192.168.1.10:6767
+Started 1 worker(s) of each type. Entering scan loop.
+[Translate Worker: 0] Started
+[Search Worker: 0] Started
+[Migration Worker: 0] Started
+```
+
+If the URL or API key are wrong you will see one of these errors and the daemon will exit:
+
+```
+# Wrong API key
+Bazarr returned HTTP 401 — invalid API key or wrong URL? Response: ...
+
+# Bazarr unreachable
+Cannot reach Bazarr at http://192.168.1.10:6767: ...
+```
+
+### Typical scan output (INFO)
+
+```
+2025-01-15 03:00:00 - INFO - Scanning for episodes
+2025-01-15 03:00:01 - INFO - Queued Provider Search for Episode ID 1042
+2025-01-15 03:00:01 - INFO - Queued Provider Search for Episode ID 1087
+2025-01-15 03:00:01 - INFO - Scan done [episodes]: 47 missing, 2 queued, 45 in cooldown
+2025-01-15 03:00:01 - INFO - [Search Worker: 0] Querying Providers for Episode ID: 1042
+2025-01-15 03:00:02 - INFO - [Search Worker: 0] Found embeddedsubtitles for pt (Score: 0). Direct download...
+2025-01-15 03:00:02 - INFO - [Search Worker: 0] Triggered embeddedsubtitles for ID: 1042
+2025-01-15 03:00:03 - INFO - [Search Worker: 0] Queued Translate: /media/show/s01e01.en.srt -> pt
+2025-01-15 03:00:03 - INFO - [Translate Worker: 0] Translating: /media/show/s01e01.en.srt to: pt
+2025-01-15 03:07:45 - INFO - [Translate Worker: 0] Translation finished
+```
+
+### Debugging why items are not being processed (DEBUG)
+
+If a video is not being queued and you don't know why, set `LOG_LEVEL=DEBUG`. The two most common causes are logged explicitly:
+
+```
+# Item still within the 1-hour cooldown
+DEBUG - [episodes] Skipping ID 1042: cooldown not elapsed yet
+
+# Item is already sitting in the search queue from a previous scan
+DEBUG - [episodes] Skipping ID 1042: already in search queue
+
+# Translation skipped — already queued
+DEBUG - [Search Worker: 0] ID 1042 → pt: translation already in queue
+
+# Translation skipped — cooldown
+DEBUG - [Search Worker: 0] ID 1042 → pt: translation cooldown not elapsed
+
+# How many subtitle candidates Bazarr returned for a given video
+DEBUG - [Search Worker: 0] 12 candidate(s) returned for ID 1042
+```
+
+Debug also shows the raw item counts at the start of each scan:
+
+```
+DEBUG - [episodes] 47 item(s) with missing subtitles from Bazarr
 ```
 
 ---
