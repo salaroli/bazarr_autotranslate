@@ -1,6 +1,6 @@
-from typing import Any, List, TypeVar, Callable, Type, cast, Optional
+from typing import Any, List, Optional
+import logging
 
-T = TypeVar("T")
 
 def from_str(x):
     if x is None:
@@ -19,8 +19,7 @@ def from_list(f, x):
         try:
             res.append(f(y))
         except Exception:
-            import logging
-            # This will print the full error trace AND the raw dictionary of the subtitle it rejected
+            # Logs the full trace AND the raw subtitle dict that was rejected
             logging.getLogger("bazarr_lingarr").exception(f"Skipped parsing a list item due to strict typing. Item data: {y}")
     return res
 
@@ -30,8 +29,6 @@ def from_union(fs, x):
             return f(x)
         except Exception:
             pass
-    # Instead of crashing with 'assert False', just return None and move on
-    import logging
     logging.getLogger("bazarr_lingarr").warning(f"Type assertion failed for data. Returning None. Data: {x}")
     return None
 
@@ -40,21 +37,13 @@ def from_int(x) -> int:
         return 0
     try:
         return int(x)
-    except:
+    except Exception:
         return 0
 
 def from_none(x: Any) -> Any:
     assert x is None
     return x
 
-
-def to_class(c: Type[T], x: Any) -> dict:
-    assert isinstance(x, c)
-    return cast(Any, x).to_dict()
-
-def is_type(t: Type[T], x: Any) -> T:
-    assert isinstance(x, t)
-    return x
 
 class MissingSubtitle:
     name: str
@@ -79,15 +68,6 @@ class MissingSubtitle:
         forced = from_bool(obj.get("forced"))
         hi = from_bool(obj.get("hi"))
         return MissingSubtitle(name, code2, code3, forced, hi)
-
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["name"] = from_str(self.name)
-        result["code2"] = from_str(self.code2)
-        result["code3"] = from_str(self.code3)
-        result["forced"] = from_bool(self.forced)
-        result["hi"] = from_bool(self.hi)
-        return result
 
 
 class Subtitle:
@@ -120,17 +100,6 @@ class Subtitle:
         file_size = from_union([from_int, from_none], obj.get("file_size"))
         return Subtitle(name, code2, code3, path, forced, hi, file_size)
 
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["name"] = from_str(self.name)
-        result["code2"] = from_str(self.code2)
-        result["code3"] = from_str(self.code3)
-        result["path"] = from_str(self.path)
-        result["forced"] = from_bool(self.forced)
-        result["hi"] = from_bool(self.hi)
-        if self.file_size is not None:
-            result["file_size"] = from_union([from_int, from_none], self.file_size)
-        return result
 
 class Serie:
     missing_subtitles: List[MissingSubtitle]
@@ -169,34 +138,6 @@ class Serie:
         episode_title = from_union([from_str, from_none], obj.get("episodeTitle"))
         return Serie(missing_subtitles, monitored, sonarr_episode_id, sonarr_series_id, subtitles, title, series_title, episode_number, episode_title)
 
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["missing_subtitles"] = from_list(lambda x: to_class(MissingSubtitle, x), self.missing_subtitles)
-        if self.monitored is not None:
-            result["monitored"] = from_union([from_bool, from_none], self.monitored)
-        if self.path is not None:
-            result["path"] = from_union([from_str, from_none], self.path)
-        result["sonarrEpisodeId"] = from_int(self.sonarr_episode_id)
-        result["sonarrSeriesId"] = from_int(self.sonarr_series_id)
-        if self.subtitles is not None:
-            result["subtitles"] = from_union([lambda x: from_list(lambda x: to_class(Subtitle, x), x), from_none], self.subtitles)
-        if self.title is not None:
-            result["title"] = from_union([from_str, from_none], self.title)
-        if self.series_title is not None:
-            result["seriesTitle"] = from_union([from_str, from_none], self.series_title)
-        if self.episode_number is not None:
-            result["episode_number"] = from_union([from_str, from_none], self.episode_number)
-        if self.episode_title is not None:
-            result["episodeTitle"] = from_union([from_str, from_none], self.episode_title)
-        return result
-
-
-def serie_from_dict(s: Any) -> List[Serie]:
-    return from_list(Serie.from_dict, s)
-
-
-def serie_to_dict(x: List[Serie]) -> Any:
-    return from_list(lambda x: to_class(Serie, x), x)
 
 class Movie:
     title: str
@@ -225,26 +166,6 @@ class Movie:
         subtitles = from_union([lambda x: from_list(Subtitle.from_dict, x), from_none], obj.get("subtitles"))
         return Movie(title, missing_subtitles, radarr_id, monitored, path, subtitles)
 
-    def to_dict(self) -> dict:
-        result: dict = {}
-        result["title"] = from_str(self.title)
-        result["missing_subtitles"] = from_list(lambda x: to_class(MissingSubtitle, x), self.missing_subtitles)
-        result["radarrId"] = from_int(self.radarr_id)
-        if self.monitored is not None:
-            result["monitored"] = from_union([from_bool, from_none], self.monitored)
-        if self.path is not None:
-            result["path"] = from_union([from_str, from_none], self.path)
-        if self.subtitles is not None:
-            result["subtitles"] = from_union([lambda x: from_list(lambda x: to_class(Subtitle, x), x), from_none], self.subtitles)
-        return result
-
-
-def movie_from_dict(s: Any) -> List[Movie]:
-    return from_list(Movie.from_dict, s)
-
-
-def movie_to_dict(x: List[Movie]) -> Any:
-    return from_list(lambda x: to_class(Movie, x), x)
 
 class SubtitleTranslate:
     base_subtitle: Subtitle
@@ -257,11 +178,3 @@ class SubtitleTranslate:
         self.to_language = to_language
         self.video_id = video_id
         self.is_serie = is_serie
-
-    def to_dict(self):
-        return {
-            "base_subtitle": self.base_subtitle.to_dict(),
-            "to_language": self.to_language,
-            "video_id": self.video_id,
-            "is_serie": self.is_serie
-        }
