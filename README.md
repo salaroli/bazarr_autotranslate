@@ -132,8 +132,8 @@ All settings are read from environment variables (or a `.env` file in the projec
 |---|---|
 | `BAZARR_BASE_URL` | Full URL to your Bazarr instance, e.g. `http://192.168.1.10:6767` |
 | `BAZARR_API_KEY` | Bazarr API key — Settings → General → Security |
-| `BASE_LANGUAGES` | Comma-separated ISO 639-1 source language codes, priority-ordered, e.g. `en,fr` |
-| `TO_LANGUAGES` | Comma-separated ISO 639-1 target language codes, e.g. `pt,es` |
+| `BASE_LANGUAGES` | Comma-separated Bazarr language codes, priority-ordered, e.g. `en,fr` |
+| `TO_LANGUAGES` | Comma-separated Bazarr language codes, e.g. `pb,es`. Use `pb` for Brazilian Portuguese (not `pt`, which is Portugal). |
 
 ### Optional
 
@@ -196,7 +196,7 @@ services:
       - BAZARR_BASE_URL=http://192.168.1.10:6767
       - BAZARR_API_KEY=your_api_key_here
       - BASE_LANGUAGES=en
-      - TO_LANGUAGES=pt
+      - TO_LANGUAGES=pb
       - MIN_SCORE=86
       - NUM_WORKERS=1
       - INTERVAL_BETWEEN_SCANS=300
@@ -229,7 +229,7 @@ services:
       - BAZARR_BASE_URL=http://bazarr:6767
       - BAZARR_API_KEY=your_api_key_here
       - BASE_LANGUAGES=en
-      - TO_LANGUAGES=pt
+      - TO_LANGUAGES=pb
       - MIN_SCORE=86
       - LOG_LEVEL=INFO
     volumes:
@@ -249,44 +249,38 @@ Because the image is built locally (not published to a registry), deploy via **R
 3. Select **Repository** as the build method.
 4. Set **Repository URL** to `https://github.com/salaroli/bazarr_autotranslate`.
 5. Leave **Reference** as `refs/heads/main`.
-6. Scroll down to **Environment variables** and add your values there (recommended) — this keeps secrets out of the stack definition.
+6. Scroll down to **Environment variables** and add the values from the table below.
 7. Click **Deploy the stack**.
 
 Portainer will clone the repo, build the image from the `Dockerfile`, and start the container.
 
-The compose file that will be used:
+#### Environment variables
 
-```yaml
-services:
-  bazarr-autotranslate:
-    build: .
-    container_name: bazarr_autotranslate
-    restart: unless-stopped
-    environment:
-      - BAZARR_BASE_URL=${BAZARR_BASE_URL}
-      - BAZARR_API_KEY=${BAZARR_API_KEY}
-      - BASE_LANGUAGES=${BASE_LANGUAGES:-en}
-      - TO_LANGUAGES=${TO_LANGUAGES}
-      - MIN_SCORE=${MIN_SCORE:-86}
-      - NUM_WORKERS=${NUM_WORKERS:-1}
-      - INTERVAL_BETWEEN_SCANS=${INTERVAL_BETWEEN_SCANS:-300}
-      - ACTION_COOLDOWN_SECONDS=${ACTION_COOLDOWN_SECONDS:-3600}
-      - SERIES_SCAN=${SERIES_SCAN:-true}
-      - MOVIES_SCAN=${MOVIES_SCAN:-true}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    volumes:
-      - /your/host/path/logs:/usr/src/app/logs
-    networks:
-      - your_existing_network
+Set these in Portainer's **Environment variables** section. Variables with a default are optional — only set them if you want a different value.
 
-networks:
-  your_existing_network:
-    external: true
-```
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `BAZARR_API_KEY` | **Yes** | — | Your Bazarr API key (Settings → General) |
+| `BAZARR_BASE_URL` | **Yes** | `http://bazarr:6767` | Bazarr URL reachable from this container |
+| `TO_LANGUAGES` | **Yes** | `pb` | Target language(s), comma-separated. Use `pb` for Brazilian Portuguese. |
+| `BASE_LANGUAGES` | No | `en` | Source language(s), comma-separated |
+| `MIN_SCORE` | No | `86` | Minimum subtitle score for direct download |
+| `NUM_WORKERS` | No | `1` | Parallel worker threads |
+| `INTERVAL_BETWEEN_SCANS` | No | `300` | Seconds between full library scans |
+| `ACTION_COOLDOWN_SECONDS` | No | `3600` | Cooldown per video before retrying |
+| `SERIES_SCAN` | No | `true` | Enable/disable episode scanning |
+| `MOVIES_SCAN` | No | `true` | Enable/disable movie scanning |
+| `LOG_LEVEL` | No | `INFO` | `INFO` or `DEBUG` |
+| `LOG_PATH` | No | `/mnt/nvme/appdata/bazarr-autotranslate` | Host path for log files |
+| `TRANSLATION_REQUEST_TIMEOUT` | No | `900` | Seconds before a Lingarr translation request times out |
+| `SOURCE_PROFILE_ID` | No | — | Bazarr Language Profile ID to migrate **from** (profile migration feature) |
+| `TARGET_PROFILE_ID` | No | — | Bazarr Language Profile ID to migrate **to** (profile migration feature) |
 
-> **Network:** If Bazarr runs in a different stack, set `your_existing_network` to the name of the Docker network that stack uses. In Portainer you can inspect it under **Networks**. Alternatively, use Bazarr's host IP and port instead of the service name.
+#### Network
 
-> **Environment variables in Portainer:** Use the "Environment variables" section at the bottom of the stack editor to define `BAZARR_BASE_URL`, `BAZARR_API_KEY`, and `TO_LANGUAGES` without putting them in the YAML file. This keeps sensitive values out of your stack definition.
+The container joins the `mediaproxy` external Docker network by default — the same network your Bazarr stack should already be on. If you use a different network name, fork the repo and change `mediaproxy` in `docker-compose.yml` (both the service `networks:` entry and the top-level `networks:` key).
+
+If you'd rather not deal with networks, set `BAZARR_BASE_URL` to your server's LAN IP (e.g. `http://192.168.1.x:6767`) and the container will reach Bazarr without sharing a network.
 
 ---
 
@@ -318,7 +312,7 @@ On every start the daemon prints a configuration summary and immediately tests c
 Bazarr Auto-Translate starting
   Bazarr URL    : http://192.168.1.10:6767
   Base langs    : en
-  Target langs  : pt
+  Target langs  : pb
   Min score     : 86
   Workers       : 1
   Scan interval : 300s
@@ -351,10 +345,10 @@ Cannot reach Bazarr at http://192.168.1.10:6767: ...
 2025-01-15 03:00:01 - INFO - Queued Provider Search for Episode ID 1087
 2025-01-15 03:00:01 - INFO - Scan done [episodes]: 47 missing, 2 queued, 45 in cooldown
 2025-01-15 03:00:01 - INFO - [Search Worker: 0] Querying Providers for Episode ID: 1042
-2025-01-15 03:00:02 - INFO - [Search Worker: 0] Found embeddedsubtitles for pt (Score: 0). Direct download...
+2025-01-15 03:00:02 - INFO - [Search Worker: 0] Found embeddedsubtitles for pb (Score: 0). Direct download...
 2025-01-15 03:00:02 - INFO - [Search Worker: 0] Triggered embeddedsubtitles for ID: 1042
-2025-01-15 03:00:03 - INFO - [Search Worker: 0] Queued Translate: /media/show/s01e01.en.srt -> pt
-2025-01-15 03:00:03 - INFO - [Translate Worker: 0] Translating: /media/show/s01e01.en.srt to: pt
+2025-01-15 03:00:03 - INFO - [Search Worker: 0] Queued Translate: /media/show/s01e01.en.srt -> pb
+2025-01-15 03:00:03 - INFO - [Translate Worker: 0] Translating: /media/show/s01e01.en.srt to: pb
 2025-01-15 03:07:45 - INFO - [Translate Worker: 0] Translation finished
 ```
 
@@ -370,10 +364,10 @@ DEBUG - [episodes] Skipping ID 1042: cooldown not elapsed yet
 DEBUG - [episodes] Skipping ID 1042: already in search queue
 
 # Translation skipped — already queued
-DEBUG - [Search Worker: 0] ID 1042 → pt: translation already in queue
+DEBUG - [Search Worker: 0] ID 1042 → pb: translation already in queue
 
 # Translation skipped — cooldown
-DEBUG - [Search Worker: 0] ID 1042 → pt: translation cooldown not elapsed
+DEBUG - [Search Worker: 0] ID 1042 → pb: translation cooldown not elapsed
 
 # How many subtitle candidates Bazarr returned for a given video
 DEBUG - [Search Worker: 0] 12 candidate(s) returned for ID 1042
