@@ -4,16 +4,24 @@ services:
     container_name: bazarr_autotranslate
     restart: unless-stopped
     environment:
-      - BAZARR_BASE_URL=http://bazarr:6767
-      - BAZARR_API_KEY=your_api_key_here
-      - BASE_LANGUAGES=en
-      - TO_LANGUAGES=pt
-      - MIN_SCORE=86
-      - NUM_WORKERS=1
-      - INTERVAL_BETWEEN_SCANS=300
-      - ACTION_COOLDOWN_SECONDS=3600
-      - SERIES_SCAN=true
-      - MOVIES_SCAN=true
-      - LOG_LEVEL=INFO
+      - BAZARR_BASE_URL=${BAZARR_BASE_URL:-http://bazarr:6767}
+      - BAZARR_API_KEY=${BAZARR_API_KEY}
+      - BASE_LANGUAGES=${BASE_LANGUAGES:-en}
+      - TO_LANGUAGES=${TO_LANGUAGES:-pt}
+      - MIN_SCORE=${MIN_SCORE:-86}
+      - NUM_WORKERS=${NUM_WORKERS:-1}
+      - INTERVAL_BETWEEN_SCANS=${INTERVAL_BETWEEN_SCANS:-300}
+      - ACTION_COOLDOWN_SECONDS=${ACTION_COOLDOWN_SECONDS:-3600}
+      - SERIES_SCAN=${SERIES_SCAN:-true}
+      - MOVIES_SCAN=${MOVIES_SCAN:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
-      - ./logs:/usr/src/app/logs
+      - ${LOG_PATH:-./logs}:/usr/src/app/logs
+    # To join an existing Docker network (e.g. the one your Bazarr stack uses),
+    # uncomment the lines below and replace "your_existing_network" with the network name.
+    # networks:
+    #   - your_existing_network
+
+# networks:
+#   your_existing_network:
+#     external: true

@@ -249,44 +249,39 @@ Because the image is built locally (not published to a registry), deploy via **R
 3. Select **Repository** as the build method.
 4. Set **Repository URL** to `https://github.com/salaroli/bazarr_autotranslate`.
 5. Leave **Reference** as `refs/heads/main`.
-6. Scroll down to **Environment variables** and add your values there (recommended) — this keeps secrets out of the stack definition.
+6. Scroll down to **Environment variables** and add the values from the table below.
 7. Click **Deploy the stack**.
 
 Portainer will clone the repo, build the image from the `Dockerfile`, and start the container.
 
-The compose file that will be used:
+#### Environment variables
 
-```yaml
-services:
-  bazarr-autotranslate:
-    build: .
-    container_name: bazarr_autotranslate
-    restart: unless-stopped
-    environment:
-      - BAZARR_BASE_URL=${BAZARR_BASE_URL}
-      - BAZARR_API_KEY=${BAZARR_API_KEY}
-      - BASE_LANGUAGES=${BASE_LANGUAGES:-en}
-      - TO_LANGUAGES=${TO_LANGUAGES}
-      - MIN_SCORE=${MIN_SCORE:-86}
-      - NUM_WORKERS=${NUM_WORKERS:-1}
-      - INTERVAL_BETWEEN_SCANS=${INTERVAL_BETWEEN_SCANS:-300}
-      - ACTION_COOLDOWN_SECONDS=${ACTION_COOLDOWN_SECONDS:-3600}
-      - SERIES_SCAN=${SERIES_SCAN:-true}
-      - MOVIES_SCAN=${MOVIES_SCAN:-true}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    volumes:
-      - /your/host/path/logs:/usr/src/app/logs
-    networks:
-      - your_existing_network
+Set these in Portainer's **Environment variables** section. Variables with a default are optional — only set them if you want a different value.
 
-networks:
-  your_existing_network:
-    external: true
-```
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `BAZARR_API_KEY` | **Yes** | — | Your Bazarr API key (Settings → General) |
+| `BAZARR_BASE_URL` | **Yes** | `http://bazarr:6767` | Bazarr URL reachable from this container |
+| `TO_LANGUAGES` | **Yes** | `pt` | Target language(s), comma-separated |
+| `BASE_LANGUAGES` | No | `en` | Source language(s), comma-separated |
+| `MIN_SCORE` | No | `86` | Minimum subtitle score for direct download |
+| `NUM_WORKERS` | No | `1` | Parallel worker threads |
+| `INTERVAL_BETWEEN_SCANS` | No | `300` | Seconds between full library scans |
+| `ACTION_COOLDOWN_SECONDS` | No | `3600` | Cooldown per video before retrying |
+| `SERIES_SCAN` | No | `true` | Enable/disable episode scanning |
+| `MOVIES_SCAN` | No | `true` | Enable/disable movie scanning |
+| `LOG_LEVEL` | No | `INFO` | `INFO` or `DEBUG` |
+| `LOG_PATH` | No | `./logs` | Host path for log files |
 
-> **Network:** If Bazarr runs in a different stack, set `your_existing_network` to the name of the Docker network that stack uses. In Portainer you can inspect it under **Networks**. Alternatively, use Bazarr's host IP and port instead of the service name.
+#### Network
 
-> **Environment variables in Portainer:** Use the "Environment variables" section at the bottom of the stack editor to define `BAZARR_BASE_URL`, `BAZARR_API_KEY`, and `TO_LANGUAGES` without putting them in the YAML file. This keeps sensitive values out of your stack definition.
+By default the container uses its own isolated network. If Bazarr runs in a **different stack**, you have two options:
+
+**Option A — Use the host IP** (simplest): set `BAZARR_BASE_URL` to `http://192.168.1.x:6767` (your server's LAN IP). No network changes needed.
+
+**Option B — Join the existing Docker network**: edit the `docker-compose.yml` via Portainer's stack editor after deploy, or fork the repo and uncomment the `networks:` block in the compose file, replacing `your_existing_network` with the network name shown in Portainer under **Networks**.
+
+> In Portainer, go to **Networks** to find the name of the network used by your Bazarr stack — it's usually `stackname_default`.
 
 ---
 
