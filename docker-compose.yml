@@ -15,6 +15,9 @@ services:
       - SERIES_SCAN=${SERIES_SCAN:-true}
       - MOVIES_SCAN=${MOVIES_SCAN:-true}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TRANSLATION_REQUEST_TIMEOUT=${TRANSLATION_REQUEST_TIMEOUT:-900}
+      - SOURCE_PROFILE_ID=${SOURCE_PROFILE_ID:-}
+      - TARGET_PROFILE_ID=${TARGET_PROFILE_ID:-}
     volumes:
       - ${LOG_PATH:-/mnt/nvme/appdata/bazarr-autotranslate}:/usr/src/app/logs
     networks:

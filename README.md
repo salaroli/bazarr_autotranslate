@@ -272,6 +272,9 @@ Set these in Portainer's **Environment variables** section. Variables with a def
 | `MOVIES_SCAN` | No | `true` | Enable/disable movie scanning |
 | `LOG_LEVEL` | No | `INFO` | `INFO` or `DEBUG` |
 | `LOG_PATH` | No | `/mnt/nvme/appdata/bazarr-autotranslate` | Host path for log files |
+| `TRANSLATION_REQUEST_TIMEOUT` | No | `900` | Seconds before a Lingarr translation request times out |
+| `SOURCE_PROFILE_ID` | No | — | Bazarr Language Profile ID to migrate **from** (profile migration feature) |
+| `TARGET_PROFILE_ID` | No | — | Bazarr Language Profile ID to migrate **to** (profile migration feature) |
 
 #### Network
 
