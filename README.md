@@ -171,12 +171,25 @@ Before starting the daemon, make sure the following are configured in Bazarr:
 
 ### Docker Compose (standalone)
 
-Create a `docker-compose.yml` file:
+Clone the repository and use the included `docker-compose.yml`:
+
+```bash
+git clone https://github.com/salaroli/bazarr_autotranslate.git
+cd bazarr_autotranslate
+```
+
+Edit `docker-compose.yml` to fill in your values, then:
+
+```bash
+docker compose up -d --build
+```
+
+The included `docker-compose.yml`:
 
 ```yaml
 services:
   bazarr-autotranslate:
-    image: ghcr.io/salaroli/bazarr_autotranslate:latest
+    build: .
     container_name: bazarr_autotranslate
     restart: unless-stopped
     environment:
@@ -195,10 +208,6 @@ services:
       - ./logs:/usr/src/app/logs
 ```
 
-```bash
-docker compose up -d
-```
-
 ---
 
 ### Adding to an existing stack
@@ -212,7 +221,7 @@ services:
     # ... your existing bazarr config
 
   bazarr-autotranslate:
-    image: ghcr.io/salaroli/bazarr_autotranslate:latest
+    build: /path/to/bazarr_autotranslate
     container_name: bazarr_autotranslate
     restart: unless-stopped
     environment:
@@ -233,16 +242,24 @@ services:
 
 ### Portainer (Stack deployment)
 
+Because the image is built locally (not published to a registry), deploy via **Repository** rather than the Web editor:
+
 1. In Portainer, go to **Stacks → Add stack**.
 2. Give it a name, e.g. `bazarr-autotranslate`.
-3. Select **Web editor** and paste the compose below.
-4. Scroll down to **Environment variables** and fill in your values there (recommended) — or embed them directly in the editor.
-5. Click **Deploy the stack**.
+3. Select **Repository** as the build method.
+4. Set **Repository URL** to `https://github.com/salaroli/bazarr_autotranslate`.
+5. Leave **Reference** as `refs/heads/main`.
+6. Scroll down to **Environment variables** and add your values there (recommended) — this keeps secrets out of the stack definition.
+7. Click **Deploy the stack**.
+
+Portainer will clone the repo, build the image from the `Dockerfile`, and start the container.
+
+The compose file that will be used:
 
 ```yaml
 services:
   bazarr-autotranslate:
-    image: ghcr.io/salaroli/bazarr_autotranslate:latest
+    build: .
     container_name: bazarr_autotranslate
     restart: unless-stopped
     environment:
@@ -392,4 +409,9 @@ cp .env.example .env   # edit with your values
 python main.py
 ```
 
-The Docker image is built automatically via GitHub Actions on manual dispatch and published to `ghcr.io/salaroli/bazarr_autotranslate`. It supports `linux/amd64` and `linux/arm64`.
+To build and run the Docker image locally:
+
+```bash
+docker build -t bazarr_autotranslate .
+docker compose up -d --build
+```
