@@ -1,6 +1,7 @@
 services:
   bazarr-autotranslate:
-    build: .
+    image: ${REGISTRY:-192.168.1.2:3000/salaroli}/bazarr-autotranslate:${IMAGE_TAG:-latest}
+    pull_policy: always
     container_name: bazarr_autotranslate
     restart: unless-stopped
     environment:

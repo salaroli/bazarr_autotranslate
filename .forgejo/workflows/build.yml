@@ -1,0 +1,55 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  REGISTRY: 192.168.1.2:3000
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: docker-ci
+    steps:
+      - uses: actions/checkout@v4
+
+      # buildx ja vem pre-instalado na imagem docker-ci, so falta configurar
+      # o builder em runtime. --buildkitd-config, NUNCA --config (flag global
+      # do docker CLI, corrompe o estado do buildx entre este comando e o
+      # `inspect --bootstrap` seguinte).
+      - name: Configura o buildx
+        run: |
+          mkdir -p /tmp/buildkitd
+          cat > /tmp/buildkitd/buildkitd.toml <<'TOML'
+          [registry."${{ env.REGISTRY }}"]
+            http = true
+            insecure = true
+          TOML
+          docker buildx create --name ci-bazarr-autotranslate --driver docker-container \
+            --buildkitd-config /tmp/buildkitd/buildkitd.toml --use
+          docker buildx inspect --bootstrap
+
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+
+      - id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Sem cache-from/cache-to de registro: bug de concorrencia conhecido no
+      # registro de containers do Forgejo (panic em EndUploadBlob quando dois
+      # uploads paralelos terminam o mesmo digest).
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.REGISTRY }}/salaroli/bazarr-autotranslate:latest
+            ${{ env.REGISTRY }}/salaroli/bazarr-autotranslate:${{ steps.sha.outputs.short }}

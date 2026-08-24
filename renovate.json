@@ -1,0 +1,8 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "platform": "gitea",
+  "timezone": "America/Sao_Paulo",
+  "schedule": ["every day"],
+  "prConcurrentLimit": 1
+}

@@ -393,10 +393,16 @@ DEBUG - [episodes] 47 item(s) with missing subtitles from Bazarr
 
 ---
 
+## Deploy (produção)
+
+GitOps via Forgejo + Komodo, mesmo padrão do `veloren-server`/`palworld`/`piqueserver`: push na `main` builda e publica a imagem no registro interno do Forgejo (`.forgejo/workflows/build.yml`), a Stack `bazarr_autotranslate` no Komodo puxa a tag `latest` via webhook. Renovate cuida das dependências (`requirements.txt`, base image do `Dockerfile`).
+
+`BAZARR_API_KEY` fica só no `environment` da Stack no Komodo, nunca commitado — ver `.env.example` pra lista completa de variáveis.
+
 ## Building from source
 
 ```bash
-git clone https://github.com/salaroli/bazarr_autotranslate.git
+git clone http://192.168.1.2:3000/salaroli/bazarr_autotranslate.git
 cd bazarr_autotranslate
 pip install -r requirements.txt
 cp .env.example .env   # edit with your values
@@ -407,5 +413,5 @@ To build and run the Docker image locally:
 
 ```bash
 docker build -t bazarr_autotranslate .
-docker compose up -d --build
+docker compose up -d
 ```
