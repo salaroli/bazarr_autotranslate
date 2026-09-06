@@ -7,7 +7,7 @@ on:
   pull_request:
 
 env:
-  REGISTRY: 192.168.1.2:3000
+  REGISTRY: forgejo.salaro.li
 
 permissions:
   contents: read
@@ -24,14 +24,11 @@ jobs:
       # `inspect --bootstrap` seguinte).
       - name: Configura o buildx
         run: |
-          mkdir -p /tmp/buildkitd
-          cat > /tmp/buildkitd/buildkitd.toml <<'TOML'
-          [registry."${{ env.REGISTRY }}"]
-            http = true
-            insecure = true
-          TOML
-          docker buildx create --name ci-bazarr-autotranslate --driver docker-container \
-            --buildkitd-config /tmp/buildkitd/buildkitd.toml --use
+          # Registro HTTPS (forgejo.salaro.li) desde 2026-09-06 — dispensa o
+          # buildkitd.toml com http=true do registro HTTP legado. Builder velho
+          # retém config antiga: se o push falhar com "HTTP response to HTTPS
+          # client", docker rm -f do buildx_buildkit_* no runner (padrao-cicd.md).
+          docker buildx create --name ci-bazarr-autotranslate --driver docker-container --use
           docker buildx inspect --bootstrap
 
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
