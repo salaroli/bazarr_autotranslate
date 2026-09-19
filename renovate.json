@@ -3,6 +3,5 @@
   "extends": ["config:recommended"],
   "platform": "gitea",
   "timezone": "America/Sao_Paulo",
-  "schedule": ["every day"],
   "prConcurrentLimit": 1
 }
