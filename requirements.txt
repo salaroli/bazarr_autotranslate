@@ -1,4 +1,4 @@
-anyio==4.9.0
+anyio==4.15.1
 certifi==2025.7.14
 h11==0.16.0
 httpcore==1.0.9
