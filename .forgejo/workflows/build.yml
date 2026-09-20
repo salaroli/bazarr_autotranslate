@@ -28,7 +28,12 @@ jobs:
           # buildkitd.toml com http=true do registro HTTP legado. Builder velho
           # retém config antiga: se o push falhar com "HTTP response to HTTPS
           # client", docker rm -f do buildx_buildkit_* no runner (padrao-cicd.md).
-          docker buildx create --name ci-bazarr-autotranslate --driver docker-container --use
+          # --buildkitd-flags: orçamento de GC deste builder. Os defaults do
+          # buildkitd são % do disco INTEIRO por builder e não compõem entre os
+          # ~20 do parque (disco a 100% em 17 e 19/09). Valor centralizado no
+          # docker-ci: run/.forgejo/ci-image/docker-ci/Dockerfile.
+          docker buildx create --name ci-bazarr-autotranslate --buildkitd-flags "$CI_BUILDKITD_FLAGS" \
+            --driver docker-container --use
           docker buildx inspect --bootstrap
 
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
