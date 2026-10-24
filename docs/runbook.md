@@ -15,8 +15,14 @@ docker logs bazarr_autotranslate --tail 50
   (1h por vídeo) ou `MIN_SCORE` alto demais pro que existe online. Conferir
   no log o estágio em que o item parou; o pipeline é o do README.
 - **Tradução travada** → Lingarr (`docker logs lingarr`); transcrição
-  travada → provider WhisperAI configurado no Bazarr. O daemon só enfileira
+  travada → provider WhisperAI configurado no Bazarr (subgen). O daemon só enfileira
   via API do Bazarr — o gargalo real aparece no log DELES.
+- 🔴 **"Translation finished" no log do daemon NÃO prova tradução.** O
+  `PATCH /api/subtitles?action=translate` do Bazarr é assíncrono e devolve
+  204 na hora, mesmo quando a tradução falha depois. Prova = `.pt-BR.srt` novo
+  ao lado do vídeo + `grep -E 'lingarr.*(fail|error)|Translation failed'` vazio
+  em `/mnt/user/appdata/bazarr/log/bazarr.log`. Causas já vistas e fixes em
+  `docs/architecture.md` § Cadeia a jusante.
 - **401/403 no log** → `BAZARR_API_KEY` rotacionada. Atualizar no
   `environment` da Stack no Komodo (via `GetStack`/`UpdateStack` ou UI —
   nunca no `.env` do disco, o deploy sobrescreve) e redeployar.
