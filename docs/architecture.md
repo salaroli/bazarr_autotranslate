@@ -55,6 +55,21 @@ Armadilhas medidas (o porquê de cada config acima):
   `{targetLanguage}`, `{contextBefore}`, `{contextAfter}`. Placeholder
   desconhecido vai literal pro modelo. Não envolver a fala em tags: o Gemini
   copia as tags na saída (medido 28/32 linhas ruins).
+- **Contexto (desde 24/10):** o Lingarr manda 2 falas antes e 2 depois
+  (`ai_context_before/after`), mas elas só chegam ao modelo se o prompt tiver
+  `{contextBefore}`/`{contextAfter}` — e até 24/10 não tinha, então o contexto
+  nunca foi usado. Agora o `ai_prompt` termina com um bloco de contexto e a
+  regra "traduza TODAS as linhas da mensagem". A/B cego em 150 falas (juiz
+  Sonnet, controle Gemini×Gemini = 22×22): esse formato venceu 42×20, erros de
+  gênero 11→2, zero fala cortada. O layout que a doc do Lingarr recomenda
+  (contexto no `ai_user_prompt` com `[Context-Before]`/`[Target-to-Translate]`)
+  e contexto sem a regra das linhas **cortavam a 2ª linha da legenda** (33/89
+  e 40/89) — não usar. Em episódio real (Locked Up S01E03/E10): 0 vazamento,
+  legendas que perdiam uma linha 113→27 e 86→23, trocas de gênero julgadas
+  18 certas × 5 erradas (os erros são quase todos o vocativo "darling" em
+  telefonema). Linhas que o Gemini bloqueia vão pro Google, que **não usa
+  contexto** — essas seguem sem correção de gênero. Backups do prompt em
+  `/mnt/user/appdata/lingarr/ai_prompt.bak-20261024*.txt`.
 - **O Lingarr reaproveita requisição `Completed` com as mesmas linhas-fonte.**
   Mudou prompt/modelo e quer refazer: apagar as `translation_request_lines`
   da requisição antiga, senão volta o resultado velho em ~10 s.
