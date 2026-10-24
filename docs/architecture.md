@@ -30,6 +30,40 @@ Lingarr nem WhisperAI — pede pro Bazarr, que orquestra os providers dele.
 Bazarr fora do ar = daemon inofensivo em loop de erro; Lingarr/Whisper fora
 do ar = estágio correspondente do pipeline falha e o item fica pra próxima.
 
+## Cadeia a jusante (estado de 2026-10-24)
+
+O daemon não fala com estes serviços, mas é o resultado deles que ele cobra:
+
+| Estágio | Quem faz | Config que importa |
+|---|---|---|
+| Tradução | Bazarr `translator_type: lingarr` → Lingarr (`:9877`, repo `salaroli/lingarr`) → **Gemini** `gemini-3.5-flash-lite`, fallback **por linha** pro Google Tradutor gratuito (`SERVICE_TYPE=["gemini","google"]`) | `lingarr_url` no Bazarr **sem `/` final**; prompt na tabela `settings` do Lingarr |
+| Transcrição | Bazarr provider `whisperai` → **subgen** (`:9876`, repo `salaroli/subgen`) na RTX 2080 SUPER | `NVIDIA_VISIBLE_DEVICES` = UUID da 2080 |
+
+Até 2026-08-29 a tradução ia pro ollama local e o subgen usava uma 3090; as
+duas GPUs morreram e a cadeia ficou quebrada em silêncio até 24/10.
+
+Armadilhas medidas (o porquê de cada config acima):
+
+- **`lingarr_url` com `/` final** vira `//api/translate/content`; o Lingarr
+  devolve o HTML da SPA com **200** e o Bazarr loga `Expecting value: line 1
+  column 1`. Nada traduz, e nada aponta pra URL.
+- **O Gemini recusa algumas falas com `PROHIBITED_CONTENT`** (palavrão/sexo,
+  ex. Rick and Morty) e esse filtro **não desliga** com `safetySettings`
+  `BLOCK_NONE`/`OFF`. Sem o fallback, uma linha recusada derruba o episódio
+  inteiro (`Invalid or empty response from Gemini API`).
+- **Prompt do Lingarr:** só existem `{lineToTranslate}`, `{sourceLanguage}`,
+  `{targetLanguage}`, `{contextBefore}`, `{contextAfter}`. Placeholder
+  desconhecido vai literal pro modelo. Não envolver a fala em tags: o Gemini
+  copia as tags na saída (medido 28/32 linhas ruins).
+- **O Lingarr reaproveita requisição `Completed` com as mesmas linhas-fonte.**
+  Mudou prompt/modelo e quer refazer: apagar as `translation_request_lines`
+  da requisição antiga, senão volta o resultado velho em ~10 s.
+- **Envs do Lingarr sobrescrevem a tabela `settings` a cada boot**
+  (`StartupService.ApplySettingsFromEnvironment`); o que estiver no compose
+  vence a UI.
+- Ruído conhecido, sem efeito: `Integration request failed: NotFound` no
+  Lingarr (o Bazarr manda ID de série onde o Lingarr espera ID de episódio).
+
 ## Sem backup, de propósito
 
 Estado = fila em memória + cooldowns em memória + logs. Perder o container
