@@ -70,6 +70,13 @@ Armadilhas medidas (o porquê de cada config acima):
   telefonema). Linhas que o Gemini bloqueia vão pro Google, que **não usa
   contexto** — essas seguem sem correção de gênero. Backups do prompt em
   `/mnt/user/appdata/lingarr/ai_prompt.bak-20261024*.txt`.
+- **Correção manual de fala:** editar o `.pt-BR.srt` **e** o `target` da
+  linha em `translation_request_lines` (senão uma retradução reaproveita o
+  erro). O daemon só traduz quando falta o `.pt-BR.srt`, então não sobrescreve.
+  Feito em 24/10 em Locked Up S01E03 pos 492 e S01E10 pos 472 (backups dos
+  `.srt` em `/mnt/user/appdata/lingarr/*.pt-BR.srt.bak-20261024`).
+- Legendas traduzidas **antes** de 24/10 continuam com o prompt antigo (sem
+  contexto); só S01E03/E10 de Locked Up foram refeitas.
 - **O Lingarr reaproveita requisição `Completed` com as mesmas linhas-fonte.**
   Mudou prompt/modelo e quer refazer: apagar as `translation_request_lines`
   da requisição antiga, senão volta o resultado velho em ~10 s.
