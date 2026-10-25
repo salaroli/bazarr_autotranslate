@@ -67,5 +67,7 @@ Armadilhas medidas (o porquê de cada config acima):
 ## Sem backup, de propósito
 
 Estado = fila em memória + cooldowns em memória + logs. Perder o container
-custa no máximo um ciclo de scan (5 min). Por isso também está no skip do
-plugin Appdata Backup (não há volume que valha o restart noturno das 04:00).
+custa no máximo um ciclo de scan (5 min). Por isso não tem backup
+próprio: o appdata só vai no `appdata_snapshot_backup` (snapshot ZFS, sem parar
+o container). O plugin Appdata Backup, que reiniciava tudo às 04:00, foi
+desinstalado em 24/10/2026.
